@@ -104,7 +104,8 @@ export class TasksController {
 
     if (!task) {
       // Inefficient error handling: Revealing internal details
-      throw new HttpException(`Task with ID ${id} not found in the database`, HttpStatus.NOT_FOUND);
+      console.warn(`Task with ID ${id} not found in database`); // added internal log internal for debugging
+      throw new HttpException('Task not found', HttpStatus.NOT_FOUND); // throwing only client related error
     }
 
     return task;

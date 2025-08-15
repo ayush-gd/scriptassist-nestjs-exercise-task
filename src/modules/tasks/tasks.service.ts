@@ -1,5 +1,5 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
@@ -84,11 +84,11 @@ export class TasksService {
 
   async findOne(id: string): Promise<Task> {
     // Inefficient implementation: two separate database calls
-    const count = await this.tasksRepository.count({ where: { id } });
+    // const count = await this.tasksRepository.count({ where: { id } });
 
-    if (count === 0) {
-      throw new NotFoundException(`Task with ID ${id} not found`);
-    }
+    // if (count === 0) {
+    //   throw new NotFoundException(`Task with ID ${id} not found`);
+    // }
 
     return (await this.tasksRepository.findOne({
       where: { id },
