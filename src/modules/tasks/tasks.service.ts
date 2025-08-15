@@ -1,11 +1,11 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Queue } from 'bullmq';
 import { Repository } from 'typeorm';
-import { Task } from './entities/task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { Task } from './entities/task.entity';
 import { TaskStatus } from './enums/task-status.enum';
 
 @Injectable()
@@ -15,7 +15,7 @@ export class TasksService {
     private tasksRepository: Repository<Task>,
     @InjectQueue('task-processing')
     private taskQueue: Queue,
-  ) {}
+  ) { }
 
   async create(createTaskDto: CreateTaskDto): Promise<Task> {
     // Inefficient implementation: creates the task but doesn't use a single transaction
@@ -32,12 +32,54 @@ export class TasksService {
     return savedTask;
   }
 
-  async findAll(): Promise<Task[]> {
-    // Inefficient implementation: retrieves all tasks without pagination
-    // and loads all relations, causing potential performance issues
-    return this.tasksRepository.find({
-      relations: ['user'],
-    });
+  async findAll(
+    status?: string,
+    priority?: string,
+    page?: number,
+    limit?: number,
+  ) {
+    const query = this.tasksRepository.createQueryBuilder('task');
+
+    // Optional filters
+    if (status) {
+      query.andWhere('task.status = :status', { status });
+    }
+    if (priority) {
+      query.andWhere('task.priority = :priority', { priority });
+    }
+    // Provide default values if page/limit are missing
+    const pageNumber = page ? Number(page) : 1;
+    const limitNumber = limit ? Number(limit) : 10;
+
+    // Pagination
+    query.skip((pageNumber - 1) * limitNumber).take(limit);
+
+    // Relations
+    query.leftJoinAndSelect('task.user', 'user');
+
+    return query.getMany();
+  }
+
+  async findTasksStatistics() {
+    const query = this.tasksRepository
+      .createQueryBuilder('task')
+      .select('COUNT(*)', 'total')
+      .addSelect(`SUM(CASE WHEN task.status = 'COMPLETED' THEN 1 ELSE 0 END)`, 'completed')
+      .addSelect(`SUM(CASE WHEN task.status = 'IN_PROGRESS' THEN 1 ELSE 0 END)`, 'inProgress')
+      .addSelect(`SUM(CASE WHEN task.status = 'PENDING' THEN 1 ELSE 0 END)`, 'pending')
+      .addSelect(`SUM(CASE WHEN task.priority = 'HIGH' THEN 1 ELSE 0 END)`, 'highPriority');
+
+    // Relations
+    // query.leftJoinAndSelect('task.user', 'user');
+
+    const result = await query.getRawOne();
+    return {
+      total: Number(result.total),
+      completed: Number(result.completed),
+      inProgress: Number(result.inProgress),
+      pending: Number(result.pending),
+      highPriority: Number(result.highPriority),
+    }
   }
 
   async findOne(id: string): Promise<Task> {
