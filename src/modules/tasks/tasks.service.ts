@@ -1,8 +1,8 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { Task } from './entities/task.entity';
@@ -13,6 +13,7 @@ export class TasksService {
   constructor(
     @InjectRepository(Task)
     private tasksRepository: Repository<Task>,
+    private dataSource: DataSource,
     @InjectQueue('task-processing')
     private taskQueue: Queue,
   ) { }
@@ -99,34 +100,72 @@ export class TasksService {
   async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
     // Inefficient implementation: multiple database calls
     // and no transaction handling
-    const task = await this.findOne(id);
+    // const task = await this.findOne(id);
 
-    const originalStatus = task.status;
+    // const originalStatus = task.status;
 
     // Directly update each field individually
-    if (updateTaskDto.title) task.title = updateTaskDto.title;
-    if (updateTaskDto.description) task.description = updateTaskDto.description;
-    if (updateTaskDto.status) task.status = updateTaskDto.status;
-    if (updateTaskDto.priority) task.priority = updateTaskDto.priority;
-    if (updateTaskDto.dueDate) task.dueDate = updateTaskDto.dueDate;
+    // if (updateTaskDto.title) task.title = updateTaskDto.title;
+    // if (updateTaskDto.description) task.description = updateTaskDto.description;
+    // if (updateTaskDto.status) task.status = updateTaskDto.status;
+    // if (updateTaskDto.priority) task.priority = updateTaskDto.priority;
+    // if (updateTaskDto.dueDate) task.dueDate = updateTaskDto.dueDate;
 
-    const updatedTask = await this.tasksRepository.save(task);
+    // const updatedTask = await this.tasksRepository.save(task);
 
     // Add to queue if status changed, but without proper error handling
-    if (originalStatus !== updatedTask.status) {
-      this.taskQueue.add('task-status-update', {
-        taskId: updatedTask.id,
-        status: updatedTask.status,
-      });
-    }
+    // if (originalStatus !== updatedTask.status) {
+    //   this.taskQueue.add('task-status-update', {
+    //     taskId: updatedTask.id,
+    //     status: updatedTask.status,
+    //   });
+    // }
 
-    return updatedTask;
+    return this.dataSource.transaction(async (manager) => {
+      // Merge DTO with existing entity
+      // preload is used to merge the DTO with the existing entity
+      const task = await manager.getRepository(Task).preload({
+        id,
+        ...updateTaskDto,
+      });
+
+      // if task is not found, throw an error
+      if (!task) {
+        throw new HttpException('Task not found', HttpStatus.NOT_FOUND);
+      }
+
+      // get the original status of the task
+      const originalStatus = task.status;
+
+      // Save task in DB
+      const updatedTask = await manager.getRepository(Task).save(task);
+
+      // Queue job if status changed
+      if (updateTaskDto.status && originalStatus !== updateTaskDto.status) {
+        try {
+          // add the job to the queue
+          await this.taskQueue.add('task-status-update', {
+            taskId: updatedTask.id,
+            status: updatedTask.status,
+          });
+        } catch (err) {
+          // if the job is not added, log the error
+          console.error(`Failed to add task-status-update job for task ${updatedTask.id}`);
+        }
+      }
+
+      return updatedTask;
+    });
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<string> {
     // Inefficient implementation: two separate database calls
-    const task = await this.findOne(id);
-    await this.tasksRepository.remove(task);
+    // const task = await this.findOne(id);
+    // delete will check if task exist or not
+    const result = await this.tasksRepository.delete(id);
+    // if task not exist then will throw an exception
+    if (result.affected === 0) throw new HttpException('Task not found', HttpStatus.NOT_FOUND); // throwing only client related error
+    return "Task Deleted Successfully!";
   }
 
   async findByStatus(status: TaskStatus): Promise<Task[]> {

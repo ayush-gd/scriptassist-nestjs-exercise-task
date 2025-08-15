@@ -115,6 +115,7 @@ export class TasksController {
   @ApiOperation({ summary: 'Update a task' })
   update(@Param('id') id: string, @Body() updateTaskDto: UpdateTaskDto) {
     // No validation if task exists before update
+    // preload is already there that will check if task not found then will throw an error
     return this.tasksService.update(id, updateTaskDto);
   }
 
